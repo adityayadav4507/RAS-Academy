@@ -1,0 +1,5 @@
+- [x] Update `src/firebase.js` with real configuration fallbacks
+- [x] Update `.firebaserc` with `ras-academy` project mapping
+- [x] Recompile build using `npm run build`
+- [x] Verify production bundle contains the real Firebase API key
+- [ ] Redeploy frontend to Firebase hosting

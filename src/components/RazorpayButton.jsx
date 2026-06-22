@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import confetti from 'canvas-confetti';
 import { CreditCard, Loader2 } from 'lucide-react';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../firebase';
 
 const loadRazorpayScript = () => {
   return new Promise((resolve) => {
@@ -18,7 +20,7 @@ const loadRazorpayScript = () => {
 };
 
 export const RazorpayButton = ({ className, plan = 'monthly', amount = 9, onSuccess }) => {
-  const { currentUser, upgradeSubscription } = useAuth();
+  const { currentUser, upgradeSubscription, isSandbox } = useAuth();
   const [loading, setLoading] = useState(false);
 
   const handlePayment = async () => {
@@ -37,8 +39,45 @@ export const RazorpayButton = ({ className, plan = 'monthly', amount = 9, onSucc
     }
 
     const keyId = import.meta.env.VITE_RAZORPAY_KEY_ID || "rzp_test_o9fE5s32Hsd3wz";
-    const amountInPaise = amount * 100;
     const planName = plan === 'monthly' ? "RAS Monthly Subscription" : "RAS Lifetime Pass";
+    
+    let orderId = "";
+    let amountInPaise = amount * 100;
+
+    const apiUrl = import.meta.env.VITE_API_URL;
+
+    if (!isSandbox) {
+      try {
+        if (apiUrl) {
+          const idToken = await currentUser.getIdToken();
+          const response = await fetch(`${apiUrl}/api/create-order`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${idToken}`
+            },
+            body: JSON.stringify({ plan })
+          });
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || `HTTP error ${response.status}`);
+          }
+          const orderResult = await response.json();
+          orderId = orderResult.orderId;
+          amountInPaise = orderResult.amount;
+        } else if (functions) {
+          const createOrderCallable = httpsCallable(functions, 'createRazorpayOrder');
+          const orderResult = await createOrderCallable({ plan });
+          orderId = orderResult.data.orderId;
+          amountInPaise = orderResult.data.amount;
+        }
+      } catch (error) {
+        console.error("Order creation failed:", error);
+        alert("ऑर्डर जनरेट करने में विफल। / Failed to generate order: " + (error.message || error));
+        setLoading(false);
+        return;
+      }
+    }
 
     const options = {
       key: keyId,
@@ -47,25 +86,60 @@ export const RazorpayButton = ({ className, plan = 'monthly', amount = 9, onSucc
       name: "RAS Academy",
       description: planName,
       image: "https://api.dicebear.com/7.x/shapes/svg?seed=ras-academy",
-      // Set options to prioritize UPI payments
+      order_id: orderId || undefined,
       prefill: {
         name: currentUser.displayName || "",
         email: currentUser.email || "",
         contact: "9999999999",
-        method: "upi" // Defaulting to highlight UPI checkout
+        method: "upi"
       },
       handler: async function (response) {
-        setLoading(false);
-        await upgradeSubscription(plan, response);
-        
-        confetti({
-          particleCount: 150,
-          spread: 80,
-          origin: { y: 0.6 }
-        });
+        try {
+          if (isSandbox) {
+            await upgradeSubscription(plan, response);
+          } else if (apiUrl) {
+            const idToken = await currentUser.getIdToken();
+            const res = await fetch(`${apiUrl}/api/verify-payment`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${idToken}`
+              },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                plan
+              })
+            });
+            if (!res.ok) {
+              const errData = await res.json().catch(() => ({}));
+              throw new Error(errData.error || `HTTP error ${res.status}`);
+            }
+          } else if (functions) {
+            const verifyPaymentCallable = httpsCallable(functions, 'verifyPayment');
+            await verifyPaymentCallable({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+              plan
+            });
+          }
+          
+          confetti({
+            particleCount: 150,
+            spread: 80,
+            origin: { y: 0.6 }
+          });
 
-        if (onSuccess) {
-          onSuccess(response);
+          if (onSuccess) {
+            onSuccess(response);
+          }
+        } catch (error) {
+          console.error("Payment verification failed:", error);
+          alert("भुगतान सत्यापन विफल रहा। / Payment verification failed: " + (error.message || error));
+        } finally {
+          setLoading(false);
         }
       },
       notes: {

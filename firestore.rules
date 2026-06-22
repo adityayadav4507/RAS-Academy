@@ -1,18 +1,27 @@
-rules_version='2'
-
+rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      // This rule allows anyone with your database reference to view, edit,
-      // and delete all data in your database. It is useful for getting
-      // started, but it is configured to expire after 30 days because it
-      // leaves your app open to attackers. At that time, all client
-      // requests to your database will be denied.
-      //
-      // Make sure to write security rules for your app before that time, or
-      // else all client requests to your database will be denied until you
-      // update your rules.
-      allow read, write: if request.time < timestamp.date(2026, 6, 25);
+    // 1. Rules for the "users" collection
+    match /users/{userId} {
+      // Allow users to read their own profile
+      allow read: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow users to create their own initial profile as a "free" user
+      allow create: if request.auth != null && request.auth.uid == userId 
+                    && request.resource.data.subscriptionStatus == 'free' 
+                    && request.resource.data.planType == 'free';
+      
+      // Allow users to update their own notes and completed topics,
+      // but prohibit them from modifying key subscription/payment properties.
+      allow update: if request.auth != null && request.auth.uid == userId 
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny([
+                      'subscriptionStatus', 
+                      'planType', 
+                      'paymentId', 
+                      'orderId', 
+                      'paymentSignature', 
+                      'paymentTimestamp'
+                    ]));
     }
   }
 }
