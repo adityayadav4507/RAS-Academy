@@ -60,7 +60,7 @@ const corsOptions = {
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps, curl, postman)
     if (!origin) return callback(null, true);
-    
+
     const isLocal = origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:");
     if (allowedOrigins.length === 0 || allowedOrigins.includes(origin) || isLocal) {
       return callback(null, true);
@@ -118,7 +118,7 @@ app.post("/api/create-order", authenticate, async (req, res, next) => {
     const options = {
       amount: amountInPaise,
       currency: "INR",
-      receipt: `receipt_order_${req.user.uid}_${Date.now()}`
+      receipt: `receipt_order_${req.user.uid.slice(0, 8)}_${Date.now()}`
     };
 
     const order = await razorpay.orders.create(options);
@@ -136,7 +136,7 @@ app.post("/api/create-order", authenticate, async (req, res, next) => {
 // Endpoint: Verify Payment and Upgrade User Status
 app.post("/api/verify-payment", authenticate, async (req, res, next) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature, plan } = req.body;
-  
+
   if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !plan) {
     return res.status(400).json({ error: "भुगतान मापदंडों का अभाव। / Missing payment parameters." });
   }
